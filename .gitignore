@@ -27,5 +27,5 @@ resources/models/
 www.youtube.com_cookies.txt
 
 # GitHub publish token — secret, never commit
-.gh_token
+.gh_token*
 *.token
