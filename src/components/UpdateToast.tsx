@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import type { UpdateStatus } from '@shared/types'
 
 /**
- * Small bottom-right toast that reflects the auto-update lifecycle. Stays out of
- * the way (nothing shown while idle / up-to-date / merely checking) and only
- * asserts itself when there's an update to download or a restart to offer.
+ * Reflects the auto-update lifecycle. A small bottom-right toast for the
+ * download/ready phases, and — once the user commits to installing — a
+ * full-screen "updating" overlay so the app never just freezes silently while
+ * it quits and the installer runs.
  */
 export function UpdateToast() {
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
   const [dismissed, setDismissed] = useState(false)
+  const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     return window.yotify.onUpdate((s) => {
@@ -16,6 +18,36 @@ export function UpdateToast() {
       setDismissed(false) // a new status is worth showing again
     })
   }, [])
+
+  // Once installing, paint the overlay first, then trigger the quit+install on
+  // the next frame so the user always sees feedback before the window goes away.
+  useEffect(() => {
+    if (!installing) return
+    const t = setTimeout(() => window.yotify.installUpdate(), 150)
+    return () => clearTimeout(t)
+  }, [installing])
+
+  // Full-screen takeover: the app is about to close and reinstall. Setting clear
+  // expectations here is what keeps the ~30s relaunch from looking like a crash.
+  if (installing) {
+    const version = status.state === 'downloaded' ? status.version : ''
+    return (
+      <div className="fixed inset-0 z-[100] grid place-items-center bg-ink-900/80 backdrop-blur-md">
+        <div className="flex max-w-md flex-col items-center gap-5 px-8 text-center">
+          <Spinner />
+          <div>
+            <div className="text-lg font-semibold text-white">
+              Updating Yotify{version ? ` to ${version}` : ''}…
+            </div>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              The app will close and reopen automatically. This can take up to a minute — no
+              need to do anything.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // States we don't bother the user with.
   if (status.state === 'idle' || status.state === 'checking' || status.state === 'none') return null
@@ -39,14 +71,12 @@ export function UpdateToast() {
   } else if (status.state === 'downloaded') {
     body = (
       <div className="flex items-center gap-3">
-        <span className="text-sm text-slate-200">
-          Version {status.version} is ready.
-        </span>
+        <span className="text-sm text-slate-200">Version {status.version} is ready.</span>
         <button
           className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
-          onClick={() => window.yotify.installUpdate()}
+          onClick={() => setInstalling(true)}
         >
-          Restart & update
+          Restart &amp; update
         </button>
       </div>
     )
@@ -68,5 +98,11 @@ export function UpdateToast() {
         </button>
       </div>
     </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-white/15 border-t-accent" />
   )
 }
