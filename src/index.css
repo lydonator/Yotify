@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Default accent (purple). Overridden at runtime from settings. */
+  --accent: 124 92 255;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-ink-900 text-slate-200 font-sans antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Custom scrollbars to match the dark theme */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+  background-clip: content-box;
+}
+
+@layer components {
+  /* Frosted-glass card */
+  .glass {
+    @apply bg-white/[0.03] border border-white/[0.06] backdrop-blur-xl;
+  }
+  .glass-strong {
+    @apply bg-ink-700/70 border border-white/[0.08] backdrop-blur-2xl;
+  }
+  .btn-ghost {
+    @apply grid place-items-center rounded-full text-slate-300 transition
+           hover:text-white hover:bg-white/[0.08] active:scale-95;
+  }
+  .input {
+    @apply w-full rounded-xl bg-ink-700/80 border border-white/[0.08] px-4 py-2.5
+           text-sm text-slate-100 placeholder:text-slate-500 outline-none
+           focus:border-accent/60 focus:ring-2 focus:ring-accent/20 transition;
+  }
+  .chip {
+    @apply rounded-full px-3 py-1 text-xs font-medium border border-white/[0.08]
+           bg-white/[0.04] text-slate-300;
+  }
+}
+
+/* Drag region for the frameless window */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}

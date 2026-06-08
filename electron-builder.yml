@@ -1,0 +1,39 @@
+appId: com.yotify.app
+productName: Yotify
+# Auto-update feed. electron-updater reads this (baked into app-update.yml) to
+# find the published latest.yml + installer on GitHub Releases.
+publish:
+  provider: github
+  owner: lydonator
+  repo: Yotify
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+# Fully self-contained: the PyInstaller sidecar binary (no Python needed) plus
+# bundled deno + ffmpeg (CPU-only; no NVIDIA CUDA). Runs on a clean Windows box.
+extraResources:
+  - from: sidecar/dist/yotify-sidecar
+    to: sidecar
+    filter:
+      - '**/*'
+  - from: resources/bin
+    to: bin
+    filter:
+      - '**/*'
+  - from: resources/icon.png
+    to: icon.png
+win:
+  icon: resources/icon.png
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Yotify

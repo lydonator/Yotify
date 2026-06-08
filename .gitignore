@@ -1,0 +1,30 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+
+# Python sidecar
+sidecar/.venv/
+sidecar/__pycache__/
+sidecar/**/__pycache__/
+*.pyc
+sidecar/build/
+sidecar/dist/
+
+# Bundled binaries (deno, ffmpeg) — large, fetched per machine
+resources/bin/
+
+# Local app data / models
+resources/models/
+.env
+.env.local
+
+# YouTube auth cookies — secret, never commit
+*cookies*.txt
+www.youtube.com_cookies.txt
+
+# GitHub publish token — secret, never commit
+.gh_token
+*.token

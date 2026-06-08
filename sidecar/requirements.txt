@@ -1,0 +1,14 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# yt-dlp moves fast (YouTube changes often) — keep it unpinned / always latest.
+# The [default] extra pulls yt-dlp-ejs (the n-signature challenge solver scripts).
+# A JS runtime is also required at runtime — Deno (see README); auto-detected on PATH.
+yt-dlp[default]>=2025.11.0
+python-multipart==0.0.20
+# faster-whisper runs CPU-only (int8) as the offline STT fallback; Groq (cloud)
+# is the default/primary STT. No GPU/CUDA.
+faster-whisper==1.1.1
+
+# Offline always-on wake word ("Hey DJ") via Vosk keyword spotting.
+vosk==0.3.45
+sounddevice==0.5.5
