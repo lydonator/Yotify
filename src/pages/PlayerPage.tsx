@@ -1,5 +1,5 @@
-import { useState } from 'react'
 import { usePlayer } from '@/state/playerStore'
+import { useUi } from '@/state/uiStore'
 import { Visualizer } from '@/components/Visualizer'
 import { SearchPanel } from '@/components/SearchPanel'
 import { QueuePanel } from '@/components/QueuePanel'
@@ -10,7 +10,8 @@ export function PlayerPage() {
   const state = usePlayer((s) => s.state)
   const current = usePlayer((s) => s.current)
   const active = state === 'playing'
-  const [tab, setTab] = useState<'search' | 'album' | 'lyrics'>('search')
+  const tab = useUi((s) => s.playerTab)
+  const setTab = useUi((s) => s.setPlayerTab)
 
   return (
     <div className="grid h-full grid-cols-[1.15fr_0.85fr_320px] grid-rows-[minmax(0,1fr)] gap-4">

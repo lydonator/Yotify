@@ -4,6 +4,7 @@
 export type Intent =
   | { type: 'play'; query: string }
   | { type: 'queue'; query: string }
+  | { type: 'search'; query: string }
   | { type: 'dj'; request: string }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -106,6 +107,13 @@ export function parseIntent(transcript: string): Intent {
   if (/^(mute|silence it)$/.test(c)) return { type: 'mute' }
   if (/^(unmute|sound on)$/.test(c)) return { type: 'unmute' }
 
+  // Search/browse requests → show results in the Search tab (don't auto-play).
+  const search = t.match(/^(?:search(?: for| up)?|find(?: me)?|look (?:up|for)|show me)\s+(.*)$/)
+  if (search && search[1]) {
+    const q = stripFillers(search[1])
+    if (q) return { type: 'search', query: q }
+  }
+
   // Conversational "Smart DJ" requests → curated by the LLM.
   if (
     /\b(like this|like that|similar|surprise me|dealer'?s choice|read the room|keep it going|more of the same|some more|mix it up)\b/.test(
@@ -162,6 +170,8 @@ export function confirmationFor(intent: Intent): string | null {
       return 'Going back.'
     case 'stop':
       return 'Stopped.'
+    case 'search':
+      return null
     case 'unknown':
       return "Sorry, I didn't catch that."
     default:

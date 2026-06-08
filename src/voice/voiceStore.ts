@@ -8,8 +8,36 @@ import { api } from '@/api/client'
 import { usePlayer } from '@/state/playerStore'
 import { useSettings } from '@/state/settingsStore'
 import { useLibrary } from '@/state/libraryStore'
+import { useSearch } from '@/state/searchStore'
 import { useUi } from '@/state/uiStore'
 import type { Track } from '@shared/types'
+
+/** Run a search by voice: jump to the Player's Search tab and populate it with
+ * the spoken query + results, so the user sees what was heard and what matched
+ * (instead of silently committing something to the queue). */
+async function showSearch(query: string): Promise<IntentResult> {
+  useUi.getState().setRoute('player')
+  useUi.getState().setPlayerTab('search')
+  await useSearch.getState().run(query)
+  const n = useSearch.getState().results.length
+  return n
+    ? { ok: true, message: `Here's what I found for ${query}.` }
+    : { ok: false, message: `I couldn't find anything for ${query}.` }
+}
+
+/** Turn a curated track list into grouped, prunable queue entries. */
+function toSetTracks(list: { artist: string; title: string }[], name: string): Track[] {
+  const groupId = `dj-${Date.now().toString(36)}`
+  return list.map((t, i) => ({
+    id: `srch-${groupId}-${i}`,
+    title: t.title,
+    artist: t.artist,
+    source: 'search',
+    query: `${t.artist} ${t.title}`.trim(),
+    groupId,
+    groupName: name
+  }))
+}
 
 export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error'
 
@@ -91,6 +119,8 @@ async function runIntent(intent: Intent): Promise<IntentResult> {
         ? { ok: true, message: `Playing ${cur.title}.` }
         : { ok: false, message: "I couldn't find that." }
     }
+    case 'search':
+      return showSearch(intent.query)
     case 'pause':
     case 'resume':
       player.playPause()
@@ -121,8 +151,8 @@ async function runIntent(intent: Intent): Promise<IntentResult> {
   }
 }
 
-/** Execute an LLM-classified voice command (transport, specific play/queue, or
- * a curated set of tracks). */
+/** Execute an LLM-classified voice command: transport, a specific track,
+ * a curated set (honoring a requested count), or a browse-style search. */
 async function runCommand(cmd: VoiceCommand): Promise<IntentResult> {
   const player = usePlayer.getState()
   switch (cmd.action) {
@@ -151,43 +181,47 @@ async function runCommand(cmd: VoiceCommand): Promise<IntentResult> {
     case 'unmute':
       if (player.muted) player.toggleMute()
       return { ok: true, message: '' }
-    case 'play':
-    case 'queue': {
-      // Curated vibe set → grouped tracks.
-      if (cmd.tracks?.length) {
-        const groupId = `dj-${Date.now().toString(36)}`
-        const tracks: Track[] = cmd.tracks.map((t, i) => ({
-          id: `srch-${groupId}-${i}`,
-          title: t.title,
-          artist: t.artist,
-          source: 'search',
-          query: `${t.artist} ${t.title}`,
-          groupId,
-          groupName: cmd.name || 'Smart DJ'
-        }))
-        if (cmd.action === 'queue') player.enqueueAlbum(tracks)
-        else player.playDjSet(tracks)
-        return { ok: true, message: cmd.reply || `Here's ${cmd.name || 'a set'}.` }
-      }
-      // Specific track.
-      if (cmd.query) {
-        if (cmd.action === 'queue') {
-          try {
-            const info = await api.topStream(cmd.query)
-            player.enqueue(info.track, true)
-            return { ok: true, message: `Added ${info.track.title}.` }
-          } catch {
-            return { ok: false, message: `I couldn't find ${cmd.query}.` }
-          }
-        }
-        await player.playQuery(cmd.query)
-        const cur = usePlayer.getState().current
-        return cur
-          ? { ok: true, message: `Playing ${cur.title}.` }
-          : { ok: false, message: `I couldn't find ${cmd.query}.` }
-      }
-      return { ok: false, message: "Sorry, I didn't catch that." }
+
+    case 'play_track': {
+      // playQuery prefers a synced local copy when "prefer local" is on.
+      if (!cmd.query) return { ok: false, message: "Sorry, I didn't catch that." }
+      await player.playQuery(cmd.query)
+      const cur = usePlayer.getState().current
+      return cur
+        ? { ok: true, message: `Playing ${cur.title}.` }
+        : { ok: false, message: `I couldn't find ${cmd.query}.` }
     }
+    case 'queue_track': {
+      if (!cmd.query) return { ok: false, message: "Sorry, I didn't catch that." }
+      try {
+        const info = await api.topStream(cmd.query)
+        player.enqueue(info.track, true)
+        return { ok: true, message: `Added ${info.track.title} to the queue.` }
+      } catch {
+        return { ok: false, message: `I couldn't find ${cmd.query}.` }
+      }
+    }
+
+    case 'play_set':
+    case 'queue_set': {
+      const list = (cmd.tracks ?? []).slice(0, cmd.count ?? cmd.tracks?.length ?? 0)
+      if (!list.length) return { ok: false, message: "I couldn't put a set together." }
+      const name = cmd.name || 'Smart DJ'
+      const tracks = toSetTracks(list, name)
+      const queued = cmd.action === 'queue_set'
+      if (queued) player.enqueueAlbum(tracks)
+      else player.playDjSet(tracks)
+      const verb = queued ? 'Queued' : 'Playing'
+      return {
+        ok: true,
+        message: cmd.reply || `${verb} ${tracks.length} tracks — ${name}.`
+      }
+    }
+
+    case 'search':
+      if (!cmd.query) return { ok: false, message: 'What would you like me to search for?' }
+      return showSearch(cmd.query)
+
     default:
       return { ok: false, message: "Sorry, I didn't catch that." }
   }
@@ -232,25 +266,13 @@ export const useVoice = create<VoiceStore>((set, get) => ({
 
       let result: IntentResult | null = null
 
-      // If the spoken phrase clearly names a track we've synced offline, play it
-      // locally and deterministically — don't let the LLM/search pull a
-      // different version. (Runs before the LLM; matcher is conservative.)
-      if (!isTransport && useSettings.getState().settings.preferLocal) {
-        const local = useLibrary.getState().findDownloadByQuery(transcript)
-        if (local) {
-          await usePlayer.getState().playTrack(local.track)
-          result = { ok: true, message: `Playing ${local.track.title}.` }
-        }
-      }
-
-      if (result) {
-        // already handled by the local match
-      } else if (isTransport) {
+      if (isTransport) {
         // Clear control word → act instantly, no LLM round-trip.
         result = await runIntent(ruleIntent)
       } else if (llmConfigured()) {
-        // Everything else (specific track, vibe, or a misheard command) → let
-        // the LLM classify + curate. Falls back to rules on error.
+        // Everything else (specific track, vibe set, search, or a misheard
+        // command) → let the LLM classify + curate. A specific play_track still
+        // prefers a synced local copy via playQuery. Falls back to rules on error.
         try {
           const current = usePlayer.getState().current
           const recent = useLibrary

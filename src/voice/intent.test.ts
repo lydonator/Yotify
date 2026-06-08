@@ -60,6 +60,13 @@ describe('parseIntent', () => {
     expect(parseIntent('surprise me').type).toBe('dj')
   })
 
+  it('routes search/browse phrasing to search', () => {
+    expect(parseIntent('search for lo-fi beats')).toEqual({ type: 'search', query: 'lo-fi beats' })
+    expect(parseIntent('find me some jazz')).toEqual({ type: 'search', query: 'jazz' })
+    expect(parseIntent('show me radiohead')).toEqual({ type: 'search', query: 'radiohead' })
+    expect(parseIntent('look up the beatles')).toEqual({ type: 'search', query: 'the beatles' })
+  })
+
   it('keeps specific titles as literal play', () => {
     expect(parseIntent('play bohemian rhapsody').type).toBe('play')
     expect(parseIntent('play livin on a prayer by bon jovi').type).toBe('play')

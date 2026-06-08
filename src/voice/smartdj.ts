@@ -69,39 +69,63 @@ export type VoiceAction =
   | 'volume_down'
   | 'mute'
   | 'unmute'
-  | 'play'
-  | 'queue'
+  | 'play_track' // one specific named song → play now
+  | 'queue_track' // one specific named song → add to queue
+  | 'play_set' // a curated vibe/genre/era set → play now
+  | 'queue_set' // a curated set → add to queue
+  | 'search' // browse: show results in the Search tab, don't auto-play
   | 'unknown'
 
 export interface VoiceCommand {
   action: VoiceAction
-  /** For a specific play/queue request: "artist title". */
+  /** For a specific track or a search: a clean "artist title" / search string. */
   query?: string
-  /** For a curated vibe request: real songs to play/queue. */
+  /** For a curated set: real songs to play/queue. */
   tracks?: { artist: string; title: string }[]
+  /** How many tracks the user asked for in a set (clamped 1..30). */
+  count?: number
   name?: string
   reply?: string
 }
 
-const INTENT_SYSTEM = `You are the voice control + DJ for a music player. The user's words come from
-speech-to-text and may be slightly misheard or have extra words. Decide ONE action and reply with
-STRICT JSON only: {"action":"...","query":"...","tracks":[{"artist":"","title":""}],"name":"...","reply":"..."}
+const MAX_SET = 30
+const DEFAULT_SET = 12
 
-Actions:
-- Transport (no query/tracks): "pause","resume","next","previous","stop","volume_up","volume_down","mute","unmute".
-  Map natural/misheard phrases: skip / next one / "next" -> next; go back / previous / back -> previous;
+const INTENT_SYSTEM = `You are the voice control + DJ for a music player. The user's words come from
+speech-to-text and may be slightly misheard or padded with filler. Decide ONE action and reply with
+STRICT JSON only:
+{"action":"...","query":"...","tracks":[{"artist":"","title":""}],"count":0,"name":"...","reply":"..."}
+
+ACTIONS — choose exactly one:
+- Transport (no other fields): "pause","resume","next","previous","stop","volume_up","volume_down","mute","unmute".
+  Map natural/misheard phrases: skip / next one -> next; go back / previous -> previous;
   louder / turn it up -> volume_up; quieter / turn it down -> volume_down; hold on / wait -> pause;
   shut up / silence / stop -> stop; continue / unpause -> resume.
-- "play": if the user named a specific song or artist, set "query" to a clean "artist title" search string.
-  If instead they asked for a vibe / mood / genre / era / activity / "more like this" / "surprise me",
-  set "tracks" to 6-9 well-known REAL songs (and a short "name"); leave query empty.
-- "queue": same as play but they said "queue", "add", or "... next".
+
+- "play_track": the user named ONE specific song or artist to play. Set "query" to a clean
+  "artist title" search string (e.g. "play bohemian rhapsody" -> query "Queen Bohemian Rhapsody").
+- "queue_track": same as play_track but they said "queue", "add", or "... next".
+
+- "play_set": the user asked for a VIBE / mood / genre / era / activity / "more like this" /
+  "surprise me" to start playing. Provide "tracks" = real, well-known songs that fit, plus a short
+  "name" for the set. If the user stated a NUMBER of songs (e.g. "20 tracks", "five songs"), set
+  "count" to that number and return exactly that many tracks (max ${MAX_SET}). If no number was given,
+  set count to ${DEFAULT_SET} and return about ${DEFAULT_SET} tracks. Leave "query" empty.
+- "queue_set": same as play_set but they said "queue" or "add".
+
+- "search": the user wants to BROWSE results, not auto-play — they used a search word such as
+  "search", "search for", "find", "find me", "look up", or "show me". Set "query" to a clean search
+  string. Do NOT set tracks.
+
 - "unknown": only if truly unintelligible.
 
-Use the now-playing track + recent history for "more like this"/"similar". Keep "reply" to one short sentence.
-Prefer a transport action when the phrase is basically a control word.`
+RULES:
+- A specific named song/artist -> play_track/queue_track. A descriptive vibe/genre/era -> a *_set. A
+  search word -> search. Prefer a transport action when the phrase is basically a control word.
+- Use the now-playing track + recent history for "more like this"/"similar".
+- "reply": ONE short sentence confirming what you did. Output strict JSON only, no prose.`
 
-/** Classify a spoken command (and curate tracks if it's a vibe request). */
+/** Classify a spoken command (and curate tracks if it's a set request). */
 export async function interpretCommand(
   transcript: string,
   context: { current?: string; recent?: string[] }
@@ -116,14 +140,25 @@ export async function interpretCommand(
 
   const r = await chatJSON(INTENT_SYSTEM, user, 0.6)
   if (!r || typeof r.action !== 'string') return null
-  const cmd: VoiceCommand = {
+
+  // Clamp a requested count into a sane range (set actions only).
+  let count: number | undefined
+  if (typeof r.count === 'number' && isFinite(r.count)) {
+    count = Math.max(1, Math.min(MAX_SET, Math.round(r.count)))
+  }
+  const tracks = Array.isArray(r.tracks)
+    ? r.tracks
+        .filter((t: any) => t && typeof t.title === 'string' && t.title.trim())
+        .slice(0, count ?? MAX_SET)
+        .map((t: any) => ({ artist: String(t.artist ?? '').trim(), title: String(t.title).trim() }))
+    : undefined
+
+  return {
     action: r.action,
     query: typeof r.query === 'string' ? r.query.trim() : undefined,
-    tracks: Array.isArray(r.tracks)
-      ? r.tracks.filter((t: any) => t && t.title).slice(0, 12)
-      : undefined,
+    tracks,
+    count,
     name: typeof r.name === 'string' ? r.name : undefined,
     reply: typeof r.reply === 'string' ? r.reply : undefined
   }
-  return cmd
 }
