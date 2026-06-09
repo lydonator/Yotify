@@ -59,6 +59,21 @@ export type VisualizerPreset =
   | 'liquid'
   | 'kaleido'
 
+/** Canonical preset order + labels — drives the Settings picker and +/- cycling. */
+export const VISUALIZER_PRESETS: { id: VisualizerPreset; label: string }[] = [
+  { id: 'album', label: 'Album (reactive art)' },
+  { id: 'kaleido', label: 'Kaleidoscope (art mandala)' },
+  { id: 'aurora', label: 'Aurora (ribbons over art)' },
+  { id: 'nebula', label: 'Nebula (art galaxy core)' },
+  { id: 'liquid', label: 'Liquid (art in a wave orb)' },
+  { id: 'sonar', label: 'Sonar (art + beat rings)' },
+  { id: 'mirror', label: 'Mirror (art reveal)' },
+  { id: 'bars', label: 'Bars (art reveal)' },
+  { id: 'waveform', label: 'Waveform (over art)' },
+  { id: 'radial', label: 'Radial (art core)' },
+  { id: 'spectrum', label: 'Spectrum (art fill)' }
+]
+
 export type SttProvider = 'local-whisper' | 'groq' | 'openai' | 'azure'
 export type TtsProvider = 'piper' | 'sapi' | 'elevenlabs' | 'openai' | 'azure'
 export type LlmProvider = 'none' | 'groq' | 'deepseek' | 'openai' | 'anthropic' | 'local'

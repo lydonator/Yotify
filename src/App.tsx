@@ -13,7 +13,7 @@ import { usePlayer } from '@/state/playerStore'
 import { useVoice } from '@/voice/voiceStore'
 import { startWakeWord, stopWakeWord } from '@/voice/wakeword'
 import { setupMediaSession } from '@/audio/mediaSession'
-import type { MediaControl } from '@shared/types'
+import { VISUALIZER_PRESETS, type MediaControl } from '@shared/types'
 
 export default function App() {
   const route = useUi((s) => s.route)
@@ -40,11 +40,27 @@ export default function App() {
     })
 
     // Push-to-talk: Ctrl+Shift+Space starts a listen/act cycle.
+    // Keypad +/- (or main-row +/-) hop through the visualizer presets.
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === 'Space') {
         e.preventDefault()
         void useVoice.getState().activate()
+        return
       }
+      const dir =
+        e.code === 'NumpadAdd' || e.key === '+'
+          ? 1
+          : e.code === 'NumpadSubtract' || e.key === '-'
+            ? -1
+            : 0
+      if (!dir || e.ctrlKey || e.altKey || e.metaKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      const { settings, update } = useSettings.getState()
+      const i = VISUALIZER_PRESETS.findIndex((p) => p.id === settings.visualizerPreset)
+      const n = VISUALIZER_PRESETS.length
+      void update({ visualizerPreset: VISUALIZER_PRESETS[(i + dir + n) % n].id })
     }
     window.addEventListener('keydown', onKey)
     return () => {

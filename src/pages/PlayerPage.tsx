@@ -1,5 +1,8 @@
+import { useEffect, useRef, useState } from 'react'
 import { usePlayer } from '@/state/playerStore'
 import { useUi } from '@/state/uiStore'
+import { useSettings } from '@/state/settingsStore'
+import { VISUALIZER_PRESETS } from '@shared/types'
 import { Visualizer } from '@/components/Visualizer'
 import { SearchPanel } from '@/components/SearchPanel'
 import { QueuePanel } from '@/components/QueuePanel'
@@ -20,6 +23,7 @@ export function PlayerPage() {
         <div className="absolute inset-0">
           <Visualizer active={active} />
         </div>
+        <PresetFlash />
         <div className="relative z-10 mt-auto bg-gradient-to-t from-ink-900/90 to-transparent p-6">
           {current ? (
             <>
@@ -62,6 +66,30 @@ export function PlayerPage() {
       <section className="min-h-0">
         <QueuePanel />
       </section>
+    </div>
+  )
+}
+
+/** Briefly shows the preset name over the visualizer when it changes (e.g.
+ * when hopping presets with keypad +/-). Skips the initial mount. */
+function PresetFlash() {
+  const preset = useSettings((s) => s.settings.visualizerPreset)
+  const [show, setShow] = useState(false)
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) {
+      first.current = false
+      return
+    }
+    setShow(true)
+    const t = setTimeout(() => setShow(false), 1400)
+    return () => clearTimeout(t)
+  }, [preset])
+  if (!show) return null
+  const label = VISUALIZER_PRESETS.find((p) => p.id === preset)?.label ?? preset
+  return (
+    <div className="absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full bg-ink-900/80 px-4 py-1.5 text-sm font-medium text-white shadow-lg backdrop-blur">
+      {label}
     </div>
   )
 }
