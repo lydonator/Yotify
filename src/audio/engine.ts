@@ -56,8 +56,10 @@ class AudioEngine {
     this.source = this.ctx.createMediaElementSource(this.el)
     this.gain = this.ctx.createGain()
     this.analyser = this.ctx.createAnalyser()
-    this.analyser.fftSize = 2048
-    this.analyser.smoothingTimeConstant = 0.82
+    // 4096 → finer low-end resolution for a clean log-frequency spectrum; the
+    // visualizer does its own attack/decay easing so keep built-in smoothing modest.
+    this.analyser.fftSize = 4096
+    this.analyser.smoothingTimeConstant = 0.7
     this.source.connect(this.gain)
     this.gain.connect(this.analyser)
     this.analyser.connect(this.ctx.destination)

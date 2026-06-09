@@ -46,14 +46,31 @@ function avg(freq: Uint8Array, lo: number, hi: number): number {
   return s / (hi - lo) / 255
 }
 
+// Musical frequency range the bands span: bass on the left, highs on the right.
+const F_MIN = 40
+const F_MAX = 16000
+
 /** Update eased bands, beat detection, level and rotation from a fresh FFT. */
-function updateEngine(eng: Engine, freq: Uint8Array, bins: number, dt: number): boolean {
-  const usable = Math.floor(bins * 0.85)
+function updateEngine(
+  eng: Engine,
+  freq: Uint8Array,
+  bins: number,
+  dt: number,
+  sampleRate: number
+): boolean {
+  // Frequency of one FFT bin. bins = fftSize/2, so binHz = sampleRate/fftSize.
+  const binHz = sampleRate / (2 * bins)
+  const ratio = F_MAX / F_MIN
+  const topBin = Math.min(bins, Math.max(2, Math.floor(F_MAX / binHz)))
   const N = eng.bands.length
-  // Log-ish band mapping (power curve) so bass isn't crammed into a few bins.
+  // Logarithmic mapping: each band spans an equal *ratio* of frequencies, which
+  // matches musical pitch. Bass occupies the left, mids the middle, highs the
+  // right — and the whole audible range is used instead of crammed to one side.
   for (let k = 0; k < N; k++) {
-    const lo = Math.floor(Math.pow(k / N, 1.8) * usable)
-    const hi = Math.max(lo + 1, Math.floor(Math.pow((k + 1) / N, 1.8) * usable))
+    const f0 = F_MIN * Math.pow(ratio, k / N)
+    const f1 = F_MIN * Math.pow(ratio, (k + 1) / N)
+    const lo = Math.max(1, Math.floor(f0 / binHz))
+    const hi = Math.min(bins, Math.max(lo + 1, Math.floor(f1 / binHz)))
     const mag = avg(freq, lo, hi)
     const cur = eng.bands[k]
     // Fast attack, slow decay → bars leap and settle like they have weight.
@@ -68,7 +85,7 @@ function updateEngine(eng: Engine, freq: Uint8Array, bins: number, dt: number): 
 
   // Spectral flux beat detection over a coarse spectrum with adaptive threshold.
   const M = eng.prevSpec.length
-  const step = Math.max(1, Math.floor(usable / M))
+  const step = Math.max(1, Math.floor(topBin / M))
   let flux = 0
   for (let m = 0; m < M; m++) {
     const cur = avg(freq, m * step, m * step + step)
@@ -141,8 +158,8 @@ export function Visualizer({ active }: { active: boolean }) {
     if (!ctx) return
 
     let raf = 0
-    const freq = new Uint8Array(1024)
-    const time = new Uint8Array(2048)
+    const freq = new Uint8Array(2048)
+    const time = new Uint8Array(4096)
     const eng: Engine = {
       bands: new Float32Array(N_BANDS),
       prevSpec: new Float32Array(64),
@@ -199,14 +216,16 @@ export function Visualizer({ active }: { active: boolean }) {
       applyTrail(w, h, TRAIL[p] ?? 1)
 
       const playing = !!analyser && activeRef.current
+      const bins = analyser ? analyser.frequencyBinCount : 1024
+      const sampleRate = analyser ? analyser.context.sampleRate : 44100
 
       if (playing) {
-        analyser.getByteFrequencyData(freq.subarray(0, analyser.frequencyBinCount))
+        analyser!.getByteFrequencyData(freq.subarray(0, bins))
       } else {
         // Decay toward silence so things gently settle (and keep rotating).
         freq.fill(0)
       }
-      const beat = updateEngine(eng, freq, playing ? analyser!.frequencyBinCount : 512, dt)
+      const beat = updateEngine(eng, freq, bins, dt, sampleRate)
 
       ctx.globalCompositeOperation = 'source-over'
 
