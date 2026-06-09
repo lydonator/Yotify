@@ -46,7 +46,17 @@ export interface StreamInfo {
 
 export type RepeatMode = 'off' | 'all' | 'one'
 
-export type VisualizerPreset = 'album' | 'bars' | 'waveform' | 'radial' | 'spectrum'
+export type VisualizerPreset =
+  | 'album'
+  | 'bars'
+  | 'waveform'
+  | 'radial'
+  | 'spectrum'
+  | 'aurora'
+  | 'nebula'
+  | 'mirror'
+  | 'sonar'
+  | 'liquid'
 
 export type SttProvider = 'local-whisper' | 'groq' | 'openai' | 'azure'
 export type TtsProvider = 'piper' | 'sapi' | 'elevenlabs' | 'openai' | 'azure'

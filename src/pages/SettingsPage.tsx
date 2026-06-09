@@ -123,6 +123,11 @@ export function SettingsPage() {
             onChange={(v) => set('visualizerPreset', v as AppSettings['visualizerPreset'])}
             options={[
               ['album', 'Album (reactive art)'],
+              ['aurora', 'Aurora (light ribbons)'],
+              ['nebula', 'Nebula (particle galaxy)'],
+              ['liquid', 'Liquid (waveform orb)'],
+              ['sonar', 'Sonar (beat rings)'],
+              ['mirror', 'Mirror (symmetric EQ)'],
               ['bars', 'Bars'],
               ['waveform', 'Waveform'],
               ['radial', 'Radial'],

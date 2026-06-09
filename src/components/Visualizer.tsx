@@ -10,6 +10,16 @@ function accentRgb(): [number, number, number] {
   return [r || 124, g || 92, b || 255]
 }
 
+/** Per-instance animation state for presets that need persistence across frames
+ * (beat-spawned rings, the particle field, time/beat tracking). */
+interface VizState {
+  t: number
+  prevBass: number
+  beatCd: number
+  rings: { r: number; life: number }[]
+  particles: { ang: number; rad: number; fi: number; spin: number }[] | null
+}
+
 /** Full-bleed canvas visualizer with selectable presets, driven by the AnalyserNode. */
 export function Visualizer({ active }: { active: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -25,7 +35,7 @@ export function Visualizer({ active }: { active: boolean }) {
   sensRef.current = sensitivity
   activeRef.current = active
 
-  // Load the album art for the 'album' preset (drawing tainted images is fine).
+  // Load the album art for art-incorporating presets (album/nebula/sonar/liquid).
   useEffect(() => {
     if (!artUrl) {
       artRef.current = null
@@ -48,6 +58,7 @@ export function Visualizer({ active }: { active: boolean }) {
     let raf = 0
     const freq = new Uint8Array(1024)
     const time = new Uint8Array(2048)
+    const viz: VizState = { t: 0, prevBass: 0, beatCd: 0, rings: [], particles: null }
 
     const resize = () => {
       // Cap the backing-store resolution: a high-DPI / scaled display would
@@ -76,32 +87,68 @@ export function Visualizer({ active }: { active: boolean }) {
       ctx.clearRect(0, 0, w, h)
       const [r, g, b] = accentRgb()
       const gain = sensRef.current
+      const p = presetRef.current
+      const img = artRef.current
 
+      // Time bookkeeping for animated presets.
+      const tSec = ts * 0.001
+      const dt = viz.t ? Math.min(0.1, tSec - viz.t) : 0
+      viz.t = tSec
+
+      // ---- Idle (paused / no audio): keep the atmospheric ones alive on a
+      // silent signal; fall back to the gentle idle line for the rest. ----
       if (!analyser || !activeRef.current) {
-        if (presetRef.current === 'album' && artRef.current) {
-          freq.fill(0)
-          drawAlbum(ctx, w, h, freq, 512, artRef.current, r, g, b, gain)
-        } else {
-          drawIdle(ctx, w, h, r, g, b, performance.now())
-        }
+        freq.fill(0)
+        time.fill(128)
+        const bins = 512
+        if (p === 'album' && img) drawAlbum(ctx, w, h, freq, bins, img, r, g, b, gain)
+        else if (p === 'aurora') drawAurora(ctx, w, h, freq, bins, r, g, b, gain, tSec)
+        else if (p === 'nebula') drawNebula(ctx, w, h, freq, bins, img, r, g, b, gain, tSec, viz)
+        else if (p === 'sonar') drawSonar(ctx, w, h, freq, bins, img, r, g, b, gain, dt, viz, false)
+        else if (p === 'liquid') drawLiquid(ctx, w, h, time, 2048, img, r, g, b, gain, tSec)
+        else drawIdle(ctx, w, h, r, g, b, performance.now())
         return
       }
 
-      if (presetRef.current === 'album') {
-        analyser.getByteFrequencyData(freq.subarray(0, analyser.frequencyBinCount))
-        drawAlbum(ctx, w, h, freq, analyser.frequencyBinCount, artRef.current, r, g, b, gain)
-      } else if (presetRef.current === 'waveform') {
+      const bins = analyser.frequencyBinCount
+
+      if (p === 'album') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawAlbum(ctx, w, h, freq, bins, img, r, g, b, gain)
+      } else if (p === 'waveform') {
         analyser.getByteTimeDomainData(time.subarray(0, analyser.fftSize))
         drawWaveform(ctx, w, h, time, analyser.fftSize, r, g, b, gain)
-      } else if (presetRef.current === 'radial') {
-        analyser.getByteFrequencyData(freq.subarray(0, analyser.frequencyBinCount))
-        drawRadial(ctx, w, h, freq, analyser.frequencyBinCount, r, g, b, gain)
-      } else if (presetRef.current === 'spectrum') {
-        analyser.getByteFrequencyData(freq.subarray(0, analyser.frequencyBinCount))
-        drawSpectrum(ctx, w, h, freq, analyser.frequencyBinCount, r, g, b, gain)
+      } else if (p === 'radial') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawRadial(ctx, w, h, freq, bins, r, g, b, gain)
+      } else if (p === 'spectrum') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawSpectrum(ctx, w, h, freq, bins, r, g, b, gain)
+      } else if (p === 'aurora') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawAurora(ctx, w, h, freq, bins, r, g, b, gain, tSec)
+      } else if (p === 'nebula') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawNebula(ctx, w, h, freq, bins, img, r, g, b, gain, tSec, viz)
+      } else if (p === 'mirror') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawMirror(ctx, w, h, freq, bins, r, g, b, gain)
+      } else if (p === 'sonar') {
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        // Beat detection drives the rings: an onset is a bass spike above a
+        // floor, rate-limited so a sustained bass line doesn't machine-gun.
+        const bn = bassEnergy(freq, gain)
+        const isBeat = bn > 0.5 && bn > viz.prevBass * 1.18 && viz.beatCd <= 0
+        if (isBeat) viz.beatCd = 0.15
+        viz.beatCd -= dt
+        viz.prevBass = bn
+        drawSonar(ctx, w, h, freq, bins, img, r, g, b, gain, dt, viz, isBeat)
+      } else if (p === 'liquid') {
+        analyser.getByteTimeDomainData(time.subarray(0, analyser.fftSize))
+        drawLiquid(ctx, w, h, time, analyser.fftSize, img, r, g, b, gain, tSec)
       } else {
-        analyser.getByteFrequencyData(freq.subarray(0, analyser.frequencyBinCount))
-        drawBars(ctx, w, h, freq, analyser.frequencyBinCount, r, g, b, gain)
+        analyser.getByteFrequencyData(freq.subarray(0, bins))
+        drawBars(ctx, w, h, freq, bins, r, g, b, gain)
       }
     }
     raf = requestAnimationFrame(draw)
@@ -113,6 +160,58 @@ export function Visualizer({ active }: { active: boolean }) {
   }, [])
 
   return <canvas ref={canvasRef} className="h-full w-full" />
+}
+
+// ---- shared helpers ---------------------------------------------------------
+
+/** Average bass energy (low bins), scaled by sensitivity. */
+function bassEnergy(freq: Uint8Array, gain: number): number {
+  let s = 0
+  for (let i = 2; i < 14; i++) s += freq[i]
+  return (s / 12 / 255) * gain
+}
+
+/** Average normalized energy across a fractional bin range [from,to). */
+function bandAvg(freq: Uint8Array, bins: number, from: number, to: number): number {
+  const a = Math.max(0, Math.floor(bins * from))
+  const z = Math.min(bins, Math.floor(bins * to))
+  if (z <= a) return 0
+  let s = 0
+  for (let i = a; i < z; i++) s += freq[i]
+  return s / (z - a) / 255
+}
+
+/** Draw the album art clipped to a glowing circle (shared by art presets). */
+function drawArtDisc(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  img: HTMLImageElement | null,
+  r: number,
+  g: number,
+  b: number
+) {
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+  ctx.closePath()
+  ctx.shadowColor = `rgba(${r},${g},${b},0.6)`
+  ctx.shadowBlur = 14
+  ctx.fillStyle = `rgb(${r},${g},${b})`
+  ctx.fill()
+  ctx.shadowBlur = 0
+  ctx.clip()
+  if (img && img.complete && img.naturalWidth > 0) {
+    const d = radius * 2
+    ctx.drawImage(img, cx - radius, cy - radius, d, d)
+  }
+  ctx.restore()
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+  ctx.strokeStyle = `rgba(255,255,255,0.18)`
+  ctx.lineWidth = 1.5
+  ctx.stroke()
 }
 
 function drawIdle(
@@ -185,28 +284,7 @@ function drawAlbum(
   ctx.restore()
 
   // Album art clipped to a circle, gently pulsing.
-  ctx.save()
-  ctx.beginPath()
-  ctx.arc(cx, cy, pulse, 0, Math.PI * 2)
-  ctx.closePath()
-  ctx.shadowColor = `rgba(${r},${g},${b},0.6)`
-  ctx.shadowBlur = 14
-  ctx.fillStyle = `rgb(${r},${g},${b})`
-  ctx.fill()
-  ctx.shadowBlur = 0
-  ctx.clip()
-  if (img && img.complete && img.naturalWidth > 0) {
-    const d = pulse * 2
-    ctx.drawImage(img, cx - pulse, cy - pulse, d, d)
-  }
-  ctx.restore()
-
-  // Crisp ring outline.
-  ctx.beginPath()
-  ctx.arc(cx, cy, pulse, 0, Math.PI * 2)
-  ctx.strokeStyle = `rgba(255,255,255,0.18)`
-  ctx.lineWidth = 1.5
-  ctx.stroke()
+  drawArtDisc(ctx, cx, cy, pulse, img, r, g, b)
 }
 
 function drawBars(
@@ -332,6 +410,254 @@ function drawSpectrum(
   grad.addColorStop(1, `rgba(${r},${g},${b},0.04)`)
   ctx.fillStyle = grad
   ctx.fill()
+}
+
+// ---- new presets ------------------------------------------------------------
+
+/** Aurora: layered, flowing light ribbons. Bass/mid/treble each drive a band;
+ * additive blending makes the overlaps glow like the northern lights. */
+function drawAurora(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  freq: Uint8Array,
+  bins: number,
+  r: number,
+  g: number,
+  b: number,
+  gain: number,
+  t: number
+) {
+  // A complementary tint (channel rotate) gives the ribbons colour variety
+  // while staying derived from the accent.
+  const layers = [
+    { e: bandAvg(freq, bins, 0.01, 0.08), yo: 0.66, c: [r, g, b], spd: 0.5, fk: 0.011, ph: 0 },
+    { e: bandAvg(freq, bins, 0.08, 0.22), yo: 0.54, c: [g, b, r], spd: 0.8, fk: 0.015, ph: 2.1 },
+    { e: bandAvg(freq, bins, 0.22, 0.5), yo: 0.43, c: [r, g, b], spd: 1.15, fk: 0.02, ph: 4.2 }
+  ]
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  for (const L of layers) {
+    const e = L.e * gain
+    const amp = h * 0.05 + e * h * 0.2
+    const yBase = h * L.yo
+    const [cr, cg, cb] = L.c
+    const thick = h * 0.24
+    const grad = ctx.createLinearGradient(0, yBase - amp, 0, yBase + thick)
+    grad.addColorStop(0, `rgba(${cr},${cg},${cb},0)`)
+    grad.addColorStop(0.3, `rgba(${cr},${cg},${cb},${0.16 + e * 0.34})`)
+    grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`)
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    for (let x = 0; x <= w; x += 6) {
+      const y =
+        yBase +
+        Math.sin(x * L.fk + t * L.spd + L.ph) * amp +
+        Math.sin(x * L.fk * 2.3 + t * L.spd * 0.7) * amp * 0.4
+      ctx.lineTo(x, y)
+    }
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+/** Nebula: a slowly rotating particle galaxy that swells with the bass, with
+ * the album art clipped into the glowing core. */
+function drawNebula(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  freq: Uint8Array,
+  bins: number,
+  img: HTMLImageElement | null,
+  r: number,
+  g: number,
+  b: number,
+  gain: number,
+  t: number,
+  viz: VizState
+) {
+  const cx = w / 2
+  const cy = h / 2
+  if (!viz.particles) {
+    viz.particles = Array.from({ length: 150 }, () => ({
+      ang: Math.random() * Math.PI * 2,
+      rad: 0.18 + Math.random() * 0.82,
+      fi: 4 + Math.floor(Math.random() * Math.max(8, bins * 0.5)),
+      spin: 0.35 + Math.random() * 0.8
+    }))
+  }
+  const bass = bandAvg(freq, bins, 0.01, 0.08) * gain
+  const baseR = Math.min(w, h) * 0.16
+  const maxOut = Math.min(w, h) * 0.46
+
+  // Core glow that breathes with the bass.
+  const glow = ctx.createRadialGradient(cx, cy, baseR * 0.5, cx, cy, maxOut * (1 + bass))
+  glow.addColorStop(0, `rgba(${r},${g},${b},${0.3 + bass * 0.35})`)
+  glow.addColorStop(1, `rgba(${r},${g},${b},0)`)
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, w, h)
+
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  for (const p of viz.particles) {
+    const fv = (freq[Math.min(bins - 1, p.fi)] / 255) * gain
+    const rad = baseR + p.rad * (maxOut - baseR) * (0.6 + bass * 0.55)
+    const a = p.ang + t * 0.15 * p.spin
+    const x = cx + Math.cos(a) * rad
+    const y = cy + Math.sin(a) * rad * 0.72 // squash to a galaxy disc
+    const sz = 0.6 + fv * 3 + p.rad * 0.5
+    ctx.fillStyle = `rgba(${r},${g},${b},${0.14 + fv * 0.7})`
+    ctx.beginPath()
+    ctx.arc(x, y, sz, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+
+  drawArtDisc(ctx, cx, cy, baseR * (0.92 + bass * 0.12), img, r, g, b)
+}
+
+/** Mirror: a sleek EQ mirrored about the horizontal centerline. */
+function drawMirror(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  freq: Uint8Array,
+  bins: number,
+  r: number,
+  g: number,
+  b: number,
+  gain: number
+) {
+  const count = 72
+  const step = Math.max(1, Math.floor((bins * 0.7) / count))
+  const gap = 3
+  const bw = (w - gap * (count - 1)) / count
+  const mid = h / 2
+  for (let i = 0; i < count; i++) {
+    let sum = 0
+    for (let j = 0; j < step; j++) sum += freq[i * step + j]
+    const v = (sum / step / 255) * gain
+    const bh = Math.max(2, v * h * 0.46)
+    const x = i * (bw + gap)
+    const grad = ctx.createLinearGradient(0, mid - bh, 0, mid + bh)
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.12)`)
+    grad.addColorStop(0.5, `rgba(${r},${g},${b},1)`)
+    grad.addColorStop(1, `rgba(${r},${g},${b},0.12)`)
+    ctx.fillStyle = grad
+    roundRect(ctx, x, mid - bh, bw, bh * 2, bw / 2)
+    ctx.fill()
+  }
+}
+
+/** Sonar: concentric rings fired outward on each detected beat, around a
+ * bass-pulsing album-art core. */
+function drawSonar(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  freq: Uint8Array,
+  bins: number,
+  img: HTMLImageElement | null,
+  r: number,
+  g: number,
+  b: number,
+  gain: number,
+  dt: number,
+  viz: VizState,
+  isBeat: boolean
+) {
+  const cx = w / 2
+  const cy = h / 2
+  const baseR = Math.min(w, h) * 0.16
+  const maxR = Math.min(w, h) * 0.52
+  const speed = Math.min(w, h) * 0.22
+
+  if (isBeat && viz.rings.length < 24) viz.rings.push({ r: baseR, life: 1 })
+
+  for (const ring of viz.rings) {
+    ring.r += dt * speed
+    ring.life -= dt * 0.7
+    const a = Math.max(0, ring.life) * 0.5
+    ctx.strokeStyle = `rgba(${r},${g},${b},${a})`
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(cx, cy, ring.r, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  viz.rings = viz.rings.filter((ring) => ring.life > 0 && ring.r < maxR * 1.3)
+
+  const bass = bandAvg(freq, bins, 0.01, 0.08) * gain
+  const pulse = baseR * (1 + bass * 0.13)
+  const glow = ctx.createRadialGradient(cx, cy, pulse * 0.6, cx, cy, pulse * (2 + bass))
+  glow.addColorStop(0, `rgba(${r},${g},${b},${0.3 + bass * 0.4})`)
+  glow.addColorStop(1, `rgba(${r},${g},${b},0)`)
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, w, h)
+
+  drawArtDisc(ctx, cx, cy, pulse, img, r, g, b)
+}
+
+/** Liquid: the waveform wrapped around a circle into a morphing orb, with the
+ * album art clipped inside so it ripples with the music. */
+function drawLiquid(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  time: Uint8Array,
+  size: number,
+  img: HTMLImageElement | null,
+  r: number,
+  g: number,
+  b: number,
+  gain: number,
+  t: number
+) {
+  const cx = w / 2
+  const cy = h / 2
+  const baseR = Math.min(w, h) * 0.2
+  const amp = Math.min(w, h) * 0.06
+  const points = 128
+  const cover = baseR + amp
+
+  // Build the morphing closed path from the time-domain signal, with a gentle
+  // baseline shimmer so it still breathes when the audio is near-silent.
+  ctx.beginPath()
+  for (let i = 0; i <= points; i++) {
+    const idx = Math.floor((i / points) * (size - 1))
+    const wv = ((time[idx] - 128) / 128) * gain
+    const ang = (i / points) * Math.PI * 2
+    const rad = baseR + wv * amp + Math.sin(ang * 3 + t * 1.2) * amp * 0.22
+    const x = cx + Math.cos(ang) * rad
+    const y = cy + Math.sin(ang) * rad
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+
+  // Clip the art (or an accent fill) into the blob.
+  ctx.save()
+  ctx.clip()
+  if (img && img.complete && img.naturalWidth > 0) {
+    ctx.drawImage(img, cx - cover, cy - cover, cover * 2, cover * 2)
+  } else {
+    const fill = ctx.createRadialGradient(cx, cy, 0, cx, cy, cover)
+    fill.addColorStop(0, `rgba(${r},${g},${b},0.9)`)
+    fill.addColorStop(1, `rgba(${r},${g},${b},0.25)`)
+    ctx.fillStyle = fill
+    ctx.fillRect(cx - cover, cy - cover, cover * 2, cover * 2)
+  }
+  ctx.restore()
+
+  // Glowing outline of the same path (still current after restore).
+  ctx.shadowColor = `rgba(${r},${g},${b},0.7)`
+  ctx.shadowBlur = 16
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+  ctx.shadowBlur = 0
 }
 
 function roundRect(
