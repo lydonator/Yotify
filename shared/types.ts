@@ -57,6 +57,7 @@ export type VisualizerPreset =
   | 'mirror'
   | 'sonar'
   | 'liquid'
+  | 'kaleido'
 
 export type SttProvider = 'local-whisper' | 'groq' | 'openai' | 'azure'
 export type TtsProvider = 'piper' | 'sapi' | 'elevenlabs' | 'openai' | 'azure'

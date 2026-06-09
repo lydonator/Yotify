@@ -3,6 +3,7 @@ import { audioEngine } from '@/audio/engine'
 import { useSettings } from '@/state/settingsStore'
 import { usePlayer } from '@/state/playerStore'
 import type { VisualizerPreset } from '@shared/types'
+import { analyzeArt, gridColor, type ArtAnalysis, type Rgb } from '@/lib/artPalette'
 
 // getComputedStyle forces a style recalc — far too expensive to call at 60fps.
 // Cache the accent and refresh it a few times a second (accent changes are
@@ -26,6 +27,7 @@ interface Particle {
   radF: number
   band: number
   spin: number
+  col: Rgb | null // sampled from an actual pixel of the cover
 }
 
 /**
@@ -44,8 +46,10 @@ interface Engine {
   flash: number // 0..1, spikes on a beat then decays — drives pops/flashes
   level: number // smoothed overall energy 0..1
   rot: number // ever-advancing rotation (rad)
-  rings: { r: number; life: number }[]
+  rings: { r: number; life: number; col: Rgb }[]
+  ringSeq: number // cycles ring colors through the art palette
   particles: Particle[] | null
+  pVer: number // art version the particles were colored for
 }
 
 function avg(freq: Uint8Array, lo: number, hi: number): number {
@@ -126,6 +130,7 @@ function updateEngine(
  * ones keep a partial fade so motion leaves trails. */
 const TRAIL: Record<VisualizerPreset, number> = {
   album: 1,
+  kaleido: 1, // full-frame art mandala repainted each frame
   bars: 1, // art-reveal repainted each frame
   waveform: 1, // art backdrop repainted each frame
   radial: 0.22,
@@ -147,6 +152,8 @@ export function Visualizer({ active }: { active: boolean }) {
   const sensRef = useRef(sensitivity)
   const activeRef = useRef(active)
   const artRef = useRef<HTMLImageElement | null>(null)
+  const artInfoRef = useRef<ArtAnalysis | null>(null)
+  const artVerRef = useRef(0)
 
   presetRef.current = preset
   sensRef.current = sensitivity
@@ -155,12 +162,16 @@ export function Visualizer({ active }: { active: boolean }) {
   useEffect(() => {
     if (!artUrl) {
       artRef.current = null
+      artInfoRef.current = null
+      artVerRef.current++
       return
     }
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
       artRef.current = img
+      artInfoRef.current = analyzeArt(img)
+      artVerRef.current++
     }
     img.src = artUrl
   }, [artUrl])
@@ -183,7 +194,9 @@ export function Visualizer({ active }: { active: boolean }) {
       level: 0,
       rot: 0,
       rings: [],
-      particles: null
+      ringSeq: 0,
+      particles: null,
+      pVer: -1
     }
 
     const resize = () => {
@@ -225,6 +238,8 @@ export function Visualizer({ active }: { active: boolean }) {
       const gain = sensRef.current
       const p = presetRef.current
       const img = artRef.current
+      const art = artInfoRef.current
+      const artVer = artVerRef.current
       const col: Rgb = [r, g, b]
 
       applyTrail(w, h, TRAIL[p] ?? 1)
@@ -248,7 +263,12 @@ export function Visualizer({ active }: { active: boolean }) {
       if (
         !playing &&
         !img &&
-        (p === 'bars' || p === 'mirror' || p === 'spectrum' || p === 'waveform' || p === 'radial')
+        (p === 'bars' ||
+          p === 'mirror' ||
+          p === 'spectrum' ||
+          p === 'waveform' ||
+          p === 'radial' ||
+          p === 'kaleido')
       ) {
         drawIdle(ctx, w, h, r, g, b, ts)
         return
@@ -256,38 +276,45 @@ export function Visualizer({ active }: { active: boolean }) {
 
       switch (p) {
         case 'album':
-          drawAlbum(ctx, w, h, eng, col, gain, img)
+          drawAlbum(ctx, w, h, eng, col, gain, img, art)
+          break
+        case 'kaleido':
+          if (img && img.complete && img.naturalWidth > 0) {
+            drawKaleido(ctx, w, h, eng, col, gain, img, ts * 0.001)
+          } else {
+            drawRadial(ctx, w, h, eng, col, gain, null, null)
+          }
           break
         case 'aurora':
-          drawAurora(ctx, w, h, eng, col, gain, ts * 0.001, img)
+          drawAurora(ctx, w, h, eng, col, gain, ts * 0.001, img, art)
           break
         case 'nebula':
-          drawNebula(ctx, w, h, eng, col, gain, img)
+          drawNebula(ctx, w, h, eng, col, gain, img, art, artVer)
           break
         case 'sonar':
-          drawSonar(ctx, w, h, eng, col, gain, dt, beat, img)
+          drawSonar(ctx, w, h, eng, col, gain, dt, beat, img, art)
           break
         case 'liquid':
           if (playing) analyser!.getByteTimeDomainData(time.subarray(0, analyser!.fftSize))
           else time.fill(128)
-          drawLiquid(ctx, w, h, time, playing ? analyser!.fftSize : 2048, eng, col, gain, ts * 0.001, img)
+          drawLiquid(ctx, w, h, time, playing ? analyser!.fftSize : 2048, eng, col, gain, ts * 0.001, img, art)
           break
         case 'mirror':
-          drawMirror(ctx, w, h, eng, col, gain, img)
+          drawMirror(ctx, w, h, eng, col, gain, img, art)
           break
         case 'radial':
-          drawRadial(ctx, w, h, eng, col, gain, img)
+          drawRadial(ctx, w, h, eng, col, gain, img, art)
           break
         case 'spectrum':
-          drawSpectrum(ctx, w, h, eng, col, gain, img)
+          drawSpectrum(ctx, w, h, eng, col, gain, img, art)
           break
         case 'waveform':
           if (playing) analyser!.getByteTimeDomainData(time.subarray(0, analyser!.fftSize))
           else time.fill(128)
-          drawWaveform(ctx, w, h, time, playing ? analyser!.fftSize : 2048, eng, col, gain, img)
+          drawWaveform(ctx, w, h, time, playing ? analyser!.fftSize : 2048, eng, col, gain, img, art)
           break
         default:
-          drawBars(ctx, w, h, eng, col, gain, img)
+          drawBars(ctx, w, h, eng, col, gain, img, art)
       }
       ctx.globalCompositeOperation = 'source-over'
     }
@@ -302,9 +329,26 @@ export function Visualizer({ active }: { active: boolean }) {
   return <canvas ref={canvasRef} className="h-full w-full" />
 }
 
-type Rgb = [number, number, number]
-
 // ---- helpers ----------------------------------------------------------------
+
+/** Palette color i (cycling), or the accent when the art can't be sampled. */
+function palAt(art: ArtAnalysis | null, i: number, fallback: Rgb): Rgb {
+  return art && art.palette.length ? art.palette[i % art.palette.length] : fallback
+}
+
+/** Color of the artwork column under band i of n (bars/spectrum). */
+function colColor(art: ArtAnalysis | null, i: number, n: number, fallback: Rgb): Rgb {
+  if (!art || !art.columns.length) return fallback
+  return art.columns[Math.min(art.columns.length - 1, Math.floor((i / n) * art.columns.length))]
+}
+
+/** Color of the artwork's rim at a world-space angle (radial spokes). */
+function rimColor(art: ArtAnalysis | null, angle: number, fallback: Rgb): Rgb {
+  if (!art || !art.rim.length) return fallback
+  const n = art.rim.length
+  const idx = ((Math.round((angle / (Math.PI * 2)) * n) % n) + n) % n
+  return art.rim[idx]
+}
 
 /** Average a fractional slice of the eased bands. */
 function bandSlice(eng: Engine, from: number, to: number): number {
@@ -399,7 +443,8 @@ function drawAlbum(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const cx = w / 2
   const cy = h / 2
@@ -423,7 +468,10 @@ function drawAlbum(
     const inner = pulse + 8
     const outer = inner + 6 + v * Math.min(w, h) * 0.26
     const ang = (i / count) * Math.PI * 2 - Math.PI / 2
-    ctx.strokeStyle = `rgba(${r},${g},${b},${0.25 + v})`
+    // Each spoke continues the color of the artwork edge it springs from,
+    // so the cover appears to bleed outward into the rays.
+    const [sr, sg, sb] = rimColor(art, ang + eng.rot * 0.3, [r, g, b])
+    ctx.strokeStyle = `rgba(${sr},${sg},${sb},${0.25 + v})`
     ctx.lineWidth = 2.2
     ctx.beginPath()
     ctx.moveTo(Math.cos(ang) * inner, Math.sin(ang) * inner)
@@ -444,7 +492,8 @@ function drawBars(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const count = N_BANDS
   const gap = 2
@@ -484,6 +533,15 @@ function drawBars(
     ctx.fillRect(0, 0, w, h)
   }
   ctx.restore()
+
+  // Each bar tip glows with the color of the artwork column beneath it.
+  for (let i = 0; i < count; i++) {
+    const v = eng.bands[i] * gain
+    const bh = Math.max(2, v * h * 0.92)
+    const [cr, cg, cb] = colColor(art, i, count, [r, g, b])
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.5 + Math.min(0.5, v)})`
+    ctx.fillRect(i * (bw + gap), Math.max(0, h - bh - 3), bw, 3)
+  }
 }
 
 /** Symmetric EQ that reveals the artwork from the centerline outward. */
@@ -494,7 +552,8 @@ function drawMirror(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const count = N_BANDS
   const gap = 2
@@ -526,6 +585,17 @@ function drawMirror(
   }
   ctx.restore()
 
+  // Top and bottom edges glow with the art column's color under each bar.
+  for (let i = 0; i < count; i++) {
+    const v = eng.bands[i] * gain
+    const bh = Math.max(2, v * h * 0.46)
+    const x = i * (bw + gap)
+    const [cr, cg, cb] = colColor(art, i, count, [r, g, b])
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.5 + Math.min(0.5, v)})`
+    ctx.fillRect(x, mid - bh - 2.5, bw, 2.5)
+    ctx.fillRect(x, mid + bh, bw, 2.5)
+  }
+
   ctx.fillStyle = `rgba(255,255,255,0.14)`
   ctx.fillRect(0, mid - 0.5, w, 1)
 }
@@ -538,7 +608,8 @@ function drawRadial(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const cx = w / 2
   const cy = h / 2
@@ -556,7 +627,9 @@ function drawRadial(
       const v = eng.bands[i] * gain
       const len = baseR + v * Math.min(w, h) * 0.32
       const ang = (i / count) * Math.PI + (s ? Math.PI : 0) - Math.PI / 2
-      ctx.strokeStyle = `rgba(${r},${g},${b},${0.35 + v})`
+      // Spokes carry the artwork's edge color outward from the disc.
+      const [sr, sg, sb] = rimColor(art, ang + eng.rot * 0.5, [r, g, b])
+      ctx.strokeStyle = `rgba(${sr},${sg},${sb},${0.35 + v})`
       ctx.lineWidth = 2.5
       ctx.beginPath()
       ctx.moveTo(Math.cos(ang) * baseR, Math.sin(ang) * baseR)
@@ -577,7 +650,8 @@ function drawSpectrum(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const N = eng.bands.length
   const yAt = (i: number) => h - Math.min(1, eng.bands[i] * gain) * h * 0.95
@@ -605,13 +679,24 @@ function drawSpectrum(
   ctx.fillRect(0, 0, w, h)
   ctx.restore()
 
-  // Glowing contour line where the artwork meets the dimmed backdrop.
+  // Glowing contour line where the artwork meets the dimmed backdrop — tinted
+  // along its length with the art's own colors at each horizontal position.
   ctx.beginPath()
   for (let i = 0; i < N; i++) {
     const x = (i / (N - 1)) * w
     i === 0 ? ctx.moveTo(x, yAt(i)) : ctx.lineTo(x, yAt(i))
   }
-  ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`
+  if (art && art.columns.length) {
+    const grad = ctx.createLinearGradient(0, 0, w, 0)
+    const stops = 12
+    for (let s = 0; s <= stops; s++) {
+      const [cr, cg, cb] = colColor(art, s, stops + 1, [r, g, b])
+      grad.addColorStop(s / stops, `rgba(${cr},${cg},${cb},0.95)`)
+    }
+    ctx.strokeStyle = grad
+  } else {
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`
+  }
   ctx.lineWidth = 2
   ctx.shadowColor = `rgba(${r},${g},${b},${0.6 + eng.flash * 0.4})`
   ctx.shadowBlur = 8 + eng.flash * 14
@@ -629,7 +714,8 @@ function drawWaveform(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   // Art backdrop, darkened so the line pops.
   if (drawArtCover(ctx, w, h, img, 0.32 + eng.level * 0.1)) {
@@ -638,8 +724,20 @@ function drawWaveform(
   }
 
   ctx.lineWidth = 2.5
-  ctx.strokeStyle = `rgb(${r},${g},${b})`
-  ctx.shadowColor = `rgba(${r},${g},${b},${0.6 + eng.flash * 0.4})`
+  // The line sweeps through the artwork's palette from left to right.
+  if (art && art.palette.length > 1) {
+    const grad = ctx.createLinearGradient(0, 0, w, 0)
+    const n = Math.min(4, art.palette.length)
+    for (let i = 0; i < n; i++) {
+      const [cr, cg, cb] = art.palette[i]
+      grad.addColorStop(i / (n - 1), `rgb(${cr},${cg},${cb})`)
+    }
+    ctx.strokeStyle = grad
+  } else {
+    ctx.strokeStyle = `rgb(${r},${g},${b})`
+  }
+  const [gr, gg, gb] = palAt(art, 0, [r, g, b])
+  ctx.shadowColor = `rgba(${gr},${gg},${gb},${0.6 + eng.flash * 0.4})`
   ctx.shadowBlur = 10 + eng.flash * 16
   ctx.beginPath()
   const slice = w / size
@@ -663,7 +761,8 @@ function drawAurora(
   [r, g, b]: Rgb,
   gain: number,
   t: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   // Breathing artwork backdrop.
   if (drawArtCover(ctx, w, h, img, 0.3, 1 + eng.level * 0.06 + eng.flash * 0.03)) {
@@ -671,10 +770,12 @@ function drawAurora(
     ctx.fillRect(0, 0, w, h)
   }
 
+  // Each ribbon takes a distinct vibrant hue from the artwork's palette
+  // (channel-rotated accent as the fallback when the art can't be sampled).
   const layers = [
-    { e: bandSlice(eng, 0, 0.12), yo: 0.66, c: [r, g, b] as Rgb, spd: 0.5, fk: 0.011, ph: 0 },
-    { e: bandSlice(eng, 0.12, 0.4), yo: 0.54, c: [g, b, r] as Rgb, spd: 0.85, fk: 0.015, ph: 2.1 },
-    { e: bandSlice(eng, 0.4, 1), yo: 0.43, c: [b, r, g] as Rgb, spd: 1.2, fk: 0.02, ph: 4.2 }
+    { e: bandSlice(eng, 0, 0.12), yo: 0.66, c: palAt(art, 0, [r, g, b]), spd: 0.5, fk: 0.011, ph: 0 },
+    { e: bandSlice(eng, 0.12, 0.4), yo: 0.54, c: palAt(art, 1, [g, b, r]), spd: 0.85, fk: 0.015, ph: 2.1 },
+    { e: bandSlice(eng, 0.4, 1), yo: 0.43, c: palAt(art, 2, [b, r, g]), spd: 1.2, fk: 0.02, ph: 4.2 }
   ]
   ctx.save()
   ctx.globalCompositeOperation = 'lighter'
@@ -714,17 +815,23 @@ function drawNebula(
   eng: Engine,
   [r, g, b]: Rgb,
   gain: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null,
+  artVer: number
 ) {
   const cx = w / 2
   const cy = h / 2
   const N = eng.bands.length
-  if (!eng.particles) {
+  // Each particle is born with the color of an actual pixel of the cover —
+  // the galaxy is literally made of the album. Rebuilt when the art changes.
+  if (!eng.particles || eng.pVer !== artVer) {
+    eng.pVer = artVer
     eng.particles = Array.from({ length: 170 }, () => ({
       ang: Math.random() * Math.PI * 2,
       radF: 0.18 + Math.random() * 0.82,
       band: Math.floor(Math.random() * N),
-      spin: 0.35 + Math.random() * 0.9
+      spin: 0.35 + Math.random() * 0.9,
+      col: art ? gridColor(art, Math.random(), Math.random()) : null
     }))
   }
   const bass = bandSlice(eng, 0, 0.12) * gain
@@ -747,7 +854,8 @@ function drawNebula(
     const x = cx + Math.cos(a) * rad
     const y = cy + Math.sin(a) * rad * 0.72
     const sz = 0.6 + fv * 3.4 + p.radF * 0.5
-    ctx.fillStyle = `rgba(${r},${g},${b},${0.12 + fv * 0.8})`
+    const [pr, pg, pb] = p.col ?? [r, g, b]
+    ctx.fillStyle = `rgba(${pr},${pg},${pb},${0.12 + fv * 0.8})`
     ctx.beginPath()
     ctx.arc(x, y, sz, 0, Math.PI * 2)
     ctx.fill()
@@ -767,7 +875,8 @@ function drawSonar(
   gain: number,
   dt: number,
   beat: boolean,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const cx = w / 2
   const cy = h / 2
@@ -775,13 +884,17 @@ function drawSonar(
   const maxR = Math.min(w, h) * 0.55
   const speed = Math.min(w, h) * 0.3
 
-  if (beat && eng.rings.length < 28) eng.rings.push({ r: baseR, life: 1 })
+  // Each beat fires a ring in the next color of the artwork's palette.
+  if (beat && eng.rings.length < 28) {
+    eng.rings.push({ r: baseR, life: 1, col: palAt(art, eng.ringSeq++, [r, g, b]) })
+  }
 
   for (const ring of eng.rings) {
     ring.r += dt * speed
     ring.life -= dt * 0.6
     const a = Math.max(0, ring.life)
-    ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.55})`
+    const [cr, cg, cb] = ring.col
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${a * 0.55})`
     ctx.lineWidth = 1 + a * 2.5
     ctx.beginPath()
     ctx.arc(cx, cy, ring.r, 0, Math.PI * 2)
@@ -812,7 +925,8 @@ function drawLiquid(
   [r, g, b]: Rgb,
   gain: number,
   t: number,
-  img: HTMLImageElement | null
+  img: HTMLImageElement | null,
+  art: ArtAnalysis | null
 ) {
   const cx = w / 2
   const cy = h / 2
@@ -847,12 +961,98 @@ function drawLiquid(
   }
   ctx.restore()
 
-  ctx.shadowColor = `rgba(${r},${g},${b},${0.6 + eng.flash * 0.4})`
+  // Rim glow in the art's own palette, sweeping across the orb.
+  const [gr, gg, gb] = palAt(art, 0, [r, g, b])
+  ctx.shadowColor = `rgba(${gr},${gg},${gb},${0.6 + eng.flash * 0.4})`
   ctx.shadowBlur = 16 + eng.flash * 20
-  ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`
+  if (art && art.palette.length > 1) {
+    const grad = ctx.createLinearGradient(cx - cover, cy, cx + cover, cy)
+    const n = Math.min(3, art.palette.length)
+    for (let i = 0; i < n; i++) {
+      const [cr, cg, cb] = art.palette[i]
+      grad.addColorStop(i / (n - 1), `rgba(${cr},${cg},${cb},0.9)`)
+    }
+    ctx.strokeStyle = grad
+  } else {
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`
+  }
   ctx.lineWidth = 2.5
   ctx.stroke()
   ctx.shadowBlur = 0
+}
+
+/** Kaleidoscope: the artwork itself is sliced into mirrored wedges that spin,
+ * breathe with the energy and continuously pan — the cover becomes a living
+ * mandala with the real album disc at its heart, pulsing rings on each beat. */
+function drawKaleido(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  eng: Engine,
+  [r, g, b]: Rgb,
+  gain: number,
+  img: HTMLImageElement,
+  t: number
+) {
+  const cx = w / 2
+  const cy = h / 2
+  const bass = bandSlice(eng, 0, 0.12) * gain
+  const R = Math.hypot(w, h) / 2 + 4
+  const slices = 12 // even, so the alternating mirror tiles seamlessly
+  const step = (Math.PI * 2) / slices
+  const half = step / 2
+  const rot = eng.rot * 0.35
+
+  // Dimmed cover behind everything so wedge tips never show holes.
+  drawArtCover(ctx, w, h, img, 0.22, 1.05)
+  ctx.fillStyle = 'rgba(7,8,13,0.35)'
+  ctx.fillRect(0, 0, w, h)
+
+  const iw = img.naturalWidth
+  const ih = img.naturalHeight
+  // Zoom breathes with the overall energy and kicks on bass/beats. Kept wide
+  // (more of the cover per wedge) so frames stay detailed, not flat fields.
+  const sc = ((R * 2.4) / Math.min(iw, ih)) * (0.5 + eng.level * 0.2 + bass * 0.1 + eng.flash * 0.08)
+  const dw = iw * sc
+  const dh = ih * sc
+  // Slow pan sweeps the source through the wedges so the pattern morphs.
+  const panX = Math.sin(t * 0.23 + 1.7) * dw * 0.28
+  const panY = Math.cos(t * 0.31) * dh * 0.28
+
+  for (let i = 0; i < slices; i++) {
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.rotate(rot + (i + 0.5) * step)
+    if (i % 2) ctx.scale(1, -1) // mirror alternate wedges → seamless edges
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.arc(0, 0, R, -half - 0.015, half + 0.015)
+    ctx.closePath()
+    ctx.clip()
+    ctx.rotate(Math.sin(t * 0.15) * 0.5)
+    ctx.drawImage(img, -dw / 2 + panX, -dh / 2 + panY, dw, dh)
+    ctx.restore()
+  }
+
+  // Depth vignette so the mandala glows out of darkness at the edges.
+  const vig = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.25, cx, cy, Math.max(w, h) * 0.75)
+  vig.addColorStop(0, 'rgba(7,8,13,0)')
+  vig.addColorStop(1, 'rgba(7,8,13,0.55)')
+  ctx.fillStyle = vig
+  ctx.fillRect(0, 0, w, h)
+
+  // A ring fires out from the core on each detected beat.
+  if (eng.flash > 0.02) {
+    const rr = Math.min(w, h) * (0.18 + (1 - eng.flash) * 0.5)
+    ctx.strokeStyle = `rgba(${r},${g},${b},${eng.flash * 0.6})`
+    ctx.lineWidth = 2 + eng.flash * 3
+    ctx.beginPath()
+    ctx.arc(cx, cy, rr, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  const discR = Math.min(w, h) * 0.12 * (1 + bass * 0.14 + eng.flash * 0.05)
+  drawArtDisc(ctx, cx, cy, discR, img, [r, g, b], eng.flash)
 }
 
 function roundRect(

@@ -123,6 +123,7 @@ export function SettingsPage() {
             onChange={(v) => set('visualizerPreset', v as AppSettings['visualizerPreset'])}
             options={[
               ['album', 'Album (reactive art)'],
+              ['kaleido', 'Kaleidoscope (art mandala)'],
               ['aurora', 'Aurora (ribbons over art)'],
               ['nebula', 'Nebula (art galaxy core)'],
               ['liquid', 'Liquid (art in a wave orb)'],
