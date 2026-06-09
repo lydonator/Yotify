@@ -47,6 +47,38 @@ USERDATA = os.environ.get("YOTIFY_USERDATA", tempfile.gettempdir())
 CACHE_DIR = os.path.join(USERDATA, "audio-cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# Streamed-audio cache cap. Without one the cache grows forever (~4MB per
+# track ever played). Oldest-played files are evicted first; explicit offline
+# Syncs live in the user's download folder and are never touched by this.
+CACHE_MAX_BYTES = 1_500_000_000  # ~1.5 GB ≈ 350 tracks
+
+
+def prune_cache() -> None:
+    try:
+        files = [
+            (p, st.st_mtime, st.st_size)
+            for p in glob.glob(os.path.join(CACHE_DIR, "*"))
+            if os.path.isfile(p)
+            for st in (os.stat(p),)
+        ]
+        total = sum(size for _, _, size in files)
+        if total <= CACHE_MAX_BYTES:
+            return
+        files.sort(key=lambda f: f[1])  # oldest mtime first
+        for path, _, size in files:
+            try:
+                os.remove(path)
+                total -= size
+            except OSError:
+                continue
+            if total <= CACHE_MAX_BYTES:
+                break
+    except Exception:  # noqa: BLE001 — cache pruning must never break serving
+        pass
+
+
+prune_cache()
+
 # ---- runtime config (set by the app via POST /config) -----------------------
 
 # cookies_file: path to a Netscape cookies.txt for authenticated YouTube access.
@@ -308,6 +340,13 @@ def audio(video_id: str):
             raise
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"Audio fetch failed: {exc}") from exc
+        prune_cache()
+    else:
+        # Touch on hit so eviction is least-recently-played, not oldest-fetched.
+        try:
+            os.utime(path, None)
+        except OSError:
+            pass
     return FileResponse(path)
 
 

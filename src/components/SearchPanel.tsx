@@ -21,7 +21,10 @@ function toTrack(r: SearchResult): Track {
 export function SearchPanel() {
   const { query, results, loading, error, setQuery, run } = useSearch()
   const sidecarReady = useSettings((s) => s.sidecar.running)
-  const player = usePlayer()
+  // Actions only (stable refs) — the results list shouldn't re-render on
+  // playback position ticks.
+  const enqueue = usePlayer((s) => s.enqueue)
+  const playTrack = usePlayer((s) => s.playTrack)
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -74,7 +77,7 @@ export function SearchPanel() {
               <button
                 className="btn-ghost h-8 w-8"
                 title="Add to queue"
-                onClick={() => player.enqueue(toTrack(r))}
+                onClick={() => enqueue(toTrack(r))}
               >
                 <QueueIcon width={16} height={16} />
               </button>
@@ -82,7 +85,7 @@ export function SearchPanel() {
               <button
                 className="grid h-8 w-8 place-items-center rounded-full bg-accent text-white transition hover:brightness-110"
                 title="Play now"
-                onClick={() => void player.playTrack(toTrack(r))}
+                onClick={() => void playTrack(toTrack(r))}
               >
                 <Play width={15} height={15} />
               </button>

@@ -36,7 +36,14 @@ function buildUnits(queue: Track[]): Unit[] {
 }
 
 export function QueuePanel() {
-  const { queue, index, current, removeFromQueue, removeGroup, clearQueue, playTrack } = usePlayer()
+  // Narrow selectors: the queue list only re-renders when the queue or the
+  // playing track changes — not on every playback position tick.
+  const queue = usePlayer((s) => s.queue)
+  const current = usePlayer((s) => s.current)
+  const removeFromQueue = usePlayer((s) => s.removeFromQueue)
+  const removeGroup = usePlayer((s) => s.removeGroup)
+  const clearQueue = usePlayer((s) => s.clearQueue)
+  const playTrack = usePlayer((s) => s.playTrack)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const toggle = (id: string) =>

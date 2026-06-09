@@ -9,6 +9,11 @@ publish:
 directories:
   output: release
   buildResources: resources
+# Smaller installer: stronger LZMA (slower build, smaller download) and only
+# the English locale pak (drops ~50 unused locale files).
+compression: maximum
+electronLanguages:
+  - en-US
 files:
   - out/**/*
   - package.json

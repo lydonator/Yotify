@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import { usePlayer } from '@/state/playerStore'
 import { useLibrary } from '@/state/libraryStore'
 import { AddToPlaylist } from './AddToPlaylist'
@@ -16,7 +17,29 @@ import {
 } from './icons'
 
 export function TransportBar() {
-  const p = usePlayer()
+  // Select only what's rendered (actions are stable refs), so the bar only
+  // re-renders when one of these actually changes — not on every store write.
+  const p = usePlayer(
+    useShallow((s) => ({
+      state: s.state,
+      current: s.current,
+      artUrl: s.artUrl,
+      position: s.position,
+      duration: s.duration,
+      volume: s.volume,
+      muted: s.muted,
+      shuffle: s.shuffle,
+      repeat: s.repeat,
+      playPause: s.playPause,
+      next: s.next,
+      prev: s.prev,
+      seek: s.seek,
+      setVolume: s.setVolume,
+      toggleMute: s.toggleMute,
+      toggleShuffle: s.toggleShuffle,
+      cycleRepeat: s.cycleRepeat
+    }))
+  )
   const playing = p.state === 'playing'
   const favorites = useLibrary((s) => s.favorites)
   const toggleFavorite = useLibrary((s) => s.toggleFavorite)

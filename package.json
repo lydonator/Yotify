@@ -1,6 +1,6 @@
 {
   "name": "yotify",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Voice-controlled YouTube music player with visualizations for Windows 11",
   "main": "./out/main/index.js",
   "author": "Yotify",
@@ -21,8 +21,7 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0",
-    "electron-updater": "^6.8.9",
-    "zustand": "^4.5.5"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -33,13 +32,13 @@
     "electron": "^33.0.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
-    "framer-motion": "^11.3.0",
     "postcss": "^8.4.39",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.6",
     "typescript": "^5.5.3",
     "vite": "^5.3.3",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "zustand": "^4.5.5"
   }
 }

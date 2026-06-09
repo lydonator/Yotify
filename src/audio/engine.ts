@@ -25,7 +25,7 @@ class AudioEngine {
   private gain: GainNode | null = null
   private analyser: AnalyserNode | null = null
   private cb: EngineCallbacks = {}
-  private rafId: number | null = null
+  private timerId: number | null = null
 
   constructor() {
     this.el = new Audio()
@@ -73,13 +73,30 @@ class AudioEngine {
     return this.analyser
   }
 
+  private lastTime = -1
+  private lastDuration = -1
+
+  /** Poll position at 4Hz (not rAF/60fps) and only notify React when something
+   * actually changed — the seekbar doesn't need more, and this keeps the whole
+   * subscribed UI from re-rendering 60×/sec for the life of the app. */
   private startTimeLoop(): void {
-    if (this.rafId != null) return
-    const tick = () => {
-      this.cb.onTime?.(this.el.currentTime || 0, this.el.duration || 0)
-      this.rafId = requestAnimationFrame(tick)
+    if (this.timerId != null) return
+    this.timerId = window.setInterval(() => {
+      const t = this.el.currentTime || 0
+      const d = this.el.duration || 0
+      if (Math.abs(t - this.lastTime) > 0.15 || d !== this.lastDuration) {
+        this.lastTime = t
+        this.lastDuration = d
+        this.cb.onTime?.(t, d)
+      }
+    }, 250)
+  }
+
+  private stopTimeLoop(): void {
+    if (this.timerId != null) {
+      clearInterval(this.timerId)
+      this.timerId = null
     }
-    this.rafId = requestAnimationFrame(tick)
   }
 
   async load(url: string, autoplay = true): Promise<void> {
@@ -107,6 +124,7 @@ class AudioEngine {
   }
 
   stop(): void {
+    this.stopTimeLoop()
     this.el.pause()
     this.el.removeAttribute('src')
     this.el.load()

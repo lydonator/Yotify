@@ -20,17 +20,19 @@ export default function App() {
   const setRoute = useUi((s) => s.setRoute)
   const loadSettings = useSettings((s) => s.load)
   const loaded = useSettings((s) => s.loaded)
-  const player = usePlayer()
   const wakeWordEnabled = useSettings((s) => s.settings.wakeWordEnabled)
   const sidecarRunning = useSettings((s) => s.sidecar.running)
 
   // Boot: load settings, init the audio engine, wire global media keys + PTT.
+  // Player actions are read via getState() so App never re-renders on playback
+  // ticks (position updates several times a second while music plays).
   useEffect(() => {
     void loadSettings()
-    player.init()
+    usePlayer.getState().init()
     setupMediaSession()
 
     const off = window.yotify.onMediaControl((c: MediaControl) => {
+      const player = usePlayer.getState()
       if (c === 'playpause') player.playPause()
       else if (c === 'next') void player.next()
       else if (c === 'prev') void player.prev()

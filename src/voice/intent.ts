@@ -157,24 +157,3 @@ export function parseIntent(transcript: string): Intent {
   return q ? { type: 'play', query: q } : { type: 'unknown', text: transcript }
 }
 
-/** A short spoken confirmation for an intent, before the action's own result. */
-export function confirmationFor(intent: Intent): string | null {
-  switch (intent.type) {
-    case 'pause':
-      return 'Paused.'
-    case 'resume':
-      return null
-    case 'next':
-      return 'Skipping.'
-    case 'previous':
-      return 'Going back.'
-    case 'stop':
-      return 'Stopped.'
-    case 'search':
-      return null
-    case 'unknown':
-      return "Sorry, I didn't catch that."
-    default:
-      return null
-  }
-}

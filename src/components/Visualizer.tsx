@@ -4,10 +4,19 @@ import { useSettings } from '@/state/settingsStore'
 import { usePlayer } from '@/state/playerStore'
 import type { VisualizerPreset } from '@shared/types'
 
-function accentRgb(): [number, number, number] {
-  const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
-  const [r, g, b] = v.split(/\s+/).map(Number)
-  return [r || 124, g || 92, b || 255]
+// getComputedStyle forces a style recalc — far too expensive to call at 60fps.
+// Cache the accent and refresh it a few times a second (accent changes are
+// rare: track change or theme toggle).
+let _accent: [number, number, number] = [124, 92, 255]
+let _accentReadAt = 0
+function accentRgb(now: number): [number, number, number] {
+  if (now - _accentReadAt > 250) {
+    _accentReadAt = now
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+    const [r, g, b] = v.split(/\s+/).map(Number)
+    _accent = [r || 124, g || 92, b || 255]
+  }
+  return _accent
 }
 
 const N_BANDS = 96
@@ -212,7 +221,7 @@ export function Visualizer({ active }: { active: boolean }) {
       const analyser = audioEngine.getAnalyser()
       const w = canvas.clientWidth
       const h = canvas.clientHeight
-      const [r, g, b] = accentRgb()
+      const [r, g, b] = accentRgb(ts)
       const gain = sensRef.current
       const p = presetRef.current
       const img = artRef.current

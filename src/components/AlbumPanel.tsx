@@ -14,7 +14,10 @@ export function AlbumPanel() {
   const albumId = usePlayer((s) => s.albumId)
   const albumName = usePlayer((s) => s.albumName)
   const current = usePlayer((s) => s.current)
-  const player = usePlayer()
+  // Actions only (stable refs) — avoids re-rendering the tracklist on ticks.
+  const enqueue = usePlayer((s) => s.enqueue)
+  const enqueueAlbum = usePlayer((s) => s.enqueueAlbum)
+  const playQuery = usePlayer((s) => s.playQuery)
   const [tracks, setTracks] = useState<AlbumTrack[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -81,7 +84,7 @@ export function AlbumPanel() {
                 groupId,
                 groupName: albumName ?? undefined
               }))
-              player.enqueueAlbum(queued)
+              enqueueAlbum(queued)
             }}
           >
             <Plus width={14} height={14} /> Add album
@@ -118,7 +121,7 @@ export function AlbumPanel() {
                   onClick={async () => {
                     try {
                       const info = await api.topStream(query)
-                      player.enqueue(info.track)
+                      enqueue(info.track)
                     } catch {
                       /* ignore */
                     }
@@ -130,7 +133,7 @@ export function AlbumPanel() {
                 <button
                   className="grid h-8 w-8 place-items-center rounded-full bg-accent text-white transition hover:brightness-110"
                   title="Play from YouTube"
-                  onClick={() => void player.playQuery(query)}
+                  onClick={() => void playQuery(query)}
                 >
                   <Play width={15} height={15} />
                 </button>
