@@ -48,7 +48,7 @@ function avg(freq: Uint8Array, lo: number, hi: number): number {
 
 // Musical frequency range the bands span: bass on the left, highs on the right.
 const F_MIN = 40
-const F_MAX = 16000
+const F_MAX = 14000
 
 /** Update eased bands, beat detection, level and rotation from a fresh FFT. */
 function updateEngine(
@@ -71,7 +71,12 @@ function updateEngine(
     const f1 = F_MIN * Math.pow(ratio, (k + 1) / N)
     const lo = Math.max(1, Math.floor(f0 / binHz))
     const hi = Math.min(bins, Math.max(lo + 1, Math.floor(f1 / binHz)))
-    const mag = avg(freq, lo, hi)
+    // Treble lift: music carries far less energy up high, so boost higher bands
+    // (referenced to F_MIN, so bass isn't cut) to keep mids/highs visually
+    // present rather than leaving the top end dead except for hi-hat transients.
+    const fc = Math.sqrt(f0 * f1)
+    const tilt = Math.min(2.4, Math.pow(fc / F_MIN, 0.15))
+    const mag = Math.min(1, avg(freq, lo, hi) * tilt)
     const cur = eng.bands[k]
     // Fast attack, slow decay → bars leap and settle like they have weight.
     eng.bands[k] = mag > cur ? cur + (mag - cur) * 0.5 : cur + (mag - cur) * 0.12
